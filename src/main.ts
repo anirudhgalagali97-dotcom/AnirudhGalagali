@@ -5,7 +5,7 @@ import "./style.css";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Lenis from "lenis";
-import type { SystemField, CameraKey } from "./scene";
+import type { HeroBackground } from "./hero/HeroBackground";
 import { CONTACT, FLOWS, type Flow } from "./config";
 
 import arrowUpRight from "@phosphor-icons/core/assets/light/arrow-up-right-light.svg?raw";
@@ -133,18 +133,7 @@ for (const fig of $$("[data-flow]")) {
   if (flow) renderFlow(fig, flow);
 }
 
-/* ---------- 3D stage ---------- */
-// One camera key per chapter, in page order.
-const KEYS: CameraKey[] = [
-  { pos: [-4, 2.8, 15], look: [-9, 7, -40] }, // hero: down the avenue, core on the right
-  { pos: [-15, 8, 4], look: [4, 3, -32] }, // approach: from the side
-  { pos: [12, 26, -6], look: [0, 0, -36] }, // work: above the field
-  { pos: [-8, 5, -24], look: [3, 9, -46] }, // services: close to the core
-  { pos: [17, 4, -34], look: [-2, 10, -46] }, // process: around the core
-  { pos: [-36, 20, -8], look: [4, 2, -50] }, // about: high three-quarter view
-  { pos: [20, 3.4, -18], look: [36, 24, -150] }, // contact: past the core, up to the moon
-];
-
+/* ---------- Hero background (Neural Core) ---------- */
 function webglAvailable() {
   try {
     const c = document.createElement("canvas");
@@ -155,20 +144,28 @@ function webglAvailable() {
 }
 
 // three.js loads as its own chunk so the page text is not blocked on it.
-let field: SystemField | null = null;
+let heroBg: HeroBackground | null = null;
 const stage = $(".stage")!;
-const fieldReady: Promise<void> = webglAvailable()
-  ? import("./scene")
-      .then(({ SystemField }) => {
-        field = new SystemField($<HTMLCanvasElement>(".stage__back")!, $<HTMLCanvasElement>(".stage__front")!, KEYS, reduced);
+const heroReady: Promise<void> = webglAvailable()
+  ? import("./hero/HeroBackground")
+      .then(({ HeroBackground }) => {
+        heroBg = new HeroBackground($<HTMLCanvasElement>(".stage__canvas")!, $(".hero")!, reduced);
       })
       .catch(() => {
-        field = null;
+        heroBg = null;
       })
       .then(() => {
-        if (!field) stage.classList.add("stage--fallback");
+        if (!heroBg) stage.classList.add("stage--fallback");
       })
   : Promise.resolve(stage.classList.add("stage--fallback"));
+
+// As the hero scrolls away the camera pulls back and the network expands.
+ScrollTrigger.create({
+  trigger: ".hero",
+  start: "top top",
+  end: "bottom top",
+  onUpdate: (self) => heroBg?.setScroll(self.progress),
+});
 
 /* ---------- Giant name ---------- */
 const nameEl = $(".stage__name span")!;
@@ -229,7 +226,7 @@ ScrollTrigger.create({
   end: "max",
 });
 
-/* ---------- Chapter progress drives the camera and the rail ---------- */
+/* ---------- Chapter progress drives the rail ---------- */
 const chapters = $$("section.chapter");
 const railLinks = $$("[data-chapter]", $(".rail")!);
 let tops: number[] = [];
@@ -251,7 +248,6 @@ function updateChapter() {
     const f = gsap.utils.clamp(0, 1, (y - start) / (vh * 0.65));
     t = i + f;
   }
-  field?.setProgress(t);
   const active = Math.round(t);
   if (active !== lastActive) {
     lastActive = active;
@@ -274,6 +270,13 @@ if (!reduced) {
     opacity: 0,
     ease: "none",
     scrollTrigger: { trigger: ".hero", start: "top top", end: "bottom 30%", scrub: true },
+  });
+
+  // The scene fades out with the hero; its render loop pauses once the hero is off screen.
+  gsap.to(".stage__scene", {
+    opacity: 0,
+    ease: "none",
+    scrollTrigger: { trigger: ".hero", start: "top top", end: "bottom top", scrub: true },
   });
 
   // Manifesto: words light up at reading pace.
@@ -381,7 +384,7 @@ const bar = $<HTMLElement>(".loader__bar span")!;
 function intro() {
   measure();
   updateChapter();
-  field?.start();
+  heroBg?.start();
   ScrollTrigger.refresh();
   if (reduced) {
     loader.remove();
@@ -389,7 +392,6 @@ function intro() {
   }
   const tl = gsap.timeline();
   tl.to(loader, { opacity: 0, duration: 0.6, ease: "power2.out", onComplete: () => loader.remove() })
-    .from(".stage__back", { opacity: 0, duration: 1.6, ease: "power2.out" }, 0)
     .from(".stage__name i", { yPercent: 110, duration: 1.4, ease: "expo.out", stagger: 0.05 }, 0.15)
     .from("[data-intro]", { y: 32, opacity: 0, duration: 1.1, ease: "expo.out", stagger: 0.08 }, 0.35)
     .from(".nav, .rail", { opacity: 0, duration: 0.8 }, 0.6);
@@ -397,7 +399,7 @@ function intro() {
 
 if (reduced) {
   document.body.classList.add("reduced");
-  Promise.all([document.fonts.ready, fieldReady]).then(intro);
+  Promise.all([document.fonts.ready, heroReady]).then(intro);
 } else {
   const state = { p: 0 };
   const fontsReady = document.fonts.ready;
@@ -410,7 +412,7 @@ if (reduced) {
       bar.style.transform = `scaleX(${state.p / 100})`;
     },
     onComplete: () => {
-      Promise.all([fontsReady, fieldReady]).then(intro);
+      Promise.all([fontsReady, heroReady]).then(intro);
     },
   });
 }
